@@ -3,16 +3,21 @@ Python library and code to read and write registers via MQTT to SAJ H1 and simil
 
 ## Dependencies
 
-The code here depends upon pymodbus library.
-You can install it via **pip** or via operating system package manager (**apt**, **yum**, **dnd**, ...)
+The code here depends upon `pymodbus` and `paho` libraries.
+You can install them via **pip** or via operating system package manager (**apt**, **yum**, **dnd**, ...)
 
 ## Configure the MQTT broker
 
 You should have a local MQTT broker in your home network (or even outside, but it is heavily discouraged due to
-plain and unencrypted communication). This is outside the purpose of this document; if you are
+plain and unencrypted communication). 
+
+How to configure the broker is outside the purpose of this document; if you are
 using Linux, take a look for Mosquitto which is very easy to setup.
+
 If you have Home Assistant running in your network, you can also use its broker.
-The broker should allow anonymous authentication.
+
+The broker should allow anonymous authentication, since the script use `empty_user` and `empty_pass`
+as username and password for access.
 
 ## Configure the inverter
 You need to configure the inverter (actually the Wifi communication module AIO3 attached to the inverter) to talk with the local MQTT broker and not directly with the SAJ broker; to do that, you have two options:
@@ -32,10 +37,22 @@ simple sequential I/O paradigm. See the other scripts as easy examples.
 Simple script that accepts four arguments to command line and queries the inverter via MQTT protocol for the 
 given registers
 
+```commandline
+$ python3 readregs.py
+Usage: readregs.py <broker_ip> <serial> <register_start> <register_count>
+Example: readregs.py 192.168.1.30 H1S267K2429B029410 0x3200 0x80 > data.bin
+```
+
 ### writereg.py
 
 Simple script that accepts four arguments to command lin and writes a single register to the inverter via
 MQTT protocol
+
+```commandline
+$ python3 writereg.py 
+Usage: writereg.py <broker_ip> <serial> <register> <value>
+Example: writereg.py 192.168.1.30 H1S267K2429B029410 0x3635 0x1
+```
 
 ### parsedata.py
 
@@ -55,6 +72,7 @@ It listens and queries the inverter from time to time to detect the characterist
 drain and high grid export or high battery charge and high grid import at the same time.
 When this condition is detected, it writes a value to register 0x3249 that limits the import and
 export current to a reasonably low value.
+
 The script then restores, after 5 minutes, the original condition and keep listening for
 further swinging condition. If the condition happens again in less than 5 minutes from the last
 event, the script apply the mitigation again, but keeps it for 10 minutes, and so on.
