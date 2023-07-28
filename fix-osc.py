@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 # script to fix trashy chinese inverter
-# usage example: ./sajmqtt.py 192.168.16.1 H1S2602J2119E01121
+# usage example: ./fix-osc.py 192.168.16.1 H1S2602J2119E01121
 
 from struct import unpack_from
 from time import time

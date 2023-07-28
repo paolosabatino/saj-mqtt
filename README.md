@@ -85,6 +85,10 @@ python3 fix-osc.py <mqtt_broker_ip> <inverter_serial>
 
 or install as a systemd service with the instructions below
 
+### fix-battery-drain.py
+
+Script that tries to mitigate the nightly battery drain tinkering with flow prevention register
+
 ### Installation on linux/debian machine
 
 This manual installation instructions have been tested on debian linux system, but
