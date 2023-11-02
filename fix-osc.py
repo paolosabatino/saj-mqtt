@@ -128,7 +128,7 @@ class FixOsc(object):
     def is_fix_required(self, power_pv, power_battery, power_grid, power_backup) -> bool:
 
         # photovoltaic power is > 150W, no need for fix
-        if power_pv > 150:
+        if power_pv > 250:
             return False
 
         # backup power usage is > 150W, no need for fix
@@ -153,7 +153,7 @@ class FixOsc(object):
     def can_exit_fix(self, power_pv, power_battery, power_grid, power_backup) -> bool:
 
         # if photovoltaic power is > 150W, can exit the fix state
-        if power_pv > 150:
+        if power_pv > 250:
             return True
 
         # if backup power requered is > 150W, can exit the fix state
@@ -194,6 +194,7 @@ if len(argv) < 3:
 
 broker_ip = argv[1]
 serial = argv[2]
+exit_code = 0
 
 fixOsc = FixOsc(broker_ip, serial)
 
@@ -201,5 +202,8 @@ try:
     fixOsc.start()
 except KeyboardInterrupt:
     pass
+except:
+    exit_code = 1
 
 fixOsc.shutdown()
+exit(exit_code)

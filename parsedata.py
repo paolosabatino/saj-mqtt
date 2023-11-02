@@ -50,7 +50,10 @@ rinv_volt, rinv_current, rinv_freq, rinv_power_watt, rinv_power_va = unpack_from
 rinv_volt /= 10
 rinv_current /= 100
 rinv_freq /= 100
-rinv_pf = rinv_power_watt / rinv_power_va
+if rinv_power_va > 0:
+    rinv_pf = rinv_power_watt / rinv_power_va
+else:
+    rinv_pf = 0.0
 
 # 00ce 2 byte, ROutVolt
 # 00d0 2 byte, ROutCurr

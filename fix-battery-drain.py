@@ -25,10 +25,10 @@ class FixBatteryDrain(object):
     FLAG_REVERSE_FLOW_ALLOW = 0x0
 
     # The threshold power which, if exceeded, will apply the fix
-    THRESHOLD = -60 # Watts
+    THRESHOLD = -5  # Watts
 
-    NORMAL_CYCLE_DURATION = 120 # in seconds
-    FIX_CYCLE_DURATION = 10 # in seconds
+    NORMAL_CYCLE_DURATION = 120  # in seconds
+    FIX_CYCLE_DURATION = 21600  # in seconds
 
     def __init__(self):
         self.run = False
@@ -39,10 +39,16 @@ class FixBatteryDrain(object):
         self.sajmqtt.listen()
 
         self.run = True
+        is_fix_applied = None
 
-        # is_fix_applied, = unpack_from(">H", self.sajmqtt.query(FixBatteryDrain.REG_REVERSE_FLOW, 1))
-        # is_fix_applied = is_fix_applied == 1
-        is_fix_applied = False
+        # Get the current state
+        while is_fix_applied is not None:
+            try:
+                is_fix_applied, = unpack_from(">H", self.sajmqtt.query(FixBatteryDrain.REG_REVERSE_FLOW, 1))
+                is_fix_applied = is_fix_applied == 1
+            except:
+                time.sleep(10)
+
         duration = FixBatteryDrain.NORMAL_CYCLE_DURATION
 
         logging.info("fix-battery-drain set up, initial fix state is %s" % ("on" if is_fix_applied else "off",))
@@ -61,7 +67,7 @@ class FixBatteryDrain(object):
                         is_fix_applied = True
                         duration = FixBatteryDrain.FIX_CYCLE_DURATION
 
-                elif is_fix_applied is True:
+                elif is_fix_applied is True and power_meter >= 0:
                     logging.info("Restoring condition, status: power_pv: %d, power_meter: %d" % (power_pv, power_meter), )
                     self.sajmqtt.write(FixBatteryDrain.REG_REVERSE_FLOW, FixBatteryDrain.FLAG_REVERSE_FLOW_ALLOW)
                     is_fix_applied = False
@@ -88,6 +94,7 @@ if len(argv) < 3:
 
 broker_ip = argv[1]
 serial = argv[2]
+exit_code = 0
 
 fixBatteryDrain = FixBatteryDrain()
 try:
@@ -96,6 +103,7 @@ except KeyboardInterrupt:
     pass
 except TimeoutError as e:
     logging.error("Timeout error on initialization: %s" % (e,))
+    exit_code = 1
 
 fixBatteryDrain.shutdown()
-
+exit(exit_code)
