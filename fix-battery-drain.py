@@ -42,7 +42,7 @@ class FixBatteryDrain(object):
         is_fix_applied = None
 
         # Get the current state
-        while is_fix_applied is not None:
+        while is_fix_applied is None:
             try:
                 is_fix_applied, = unpack_from(">H", self.sajmqtt.query(FixBatteryDrain.REG_REVERSE_FLOW, 1))
                 is_fix_applied = is_fix_applied == 1
