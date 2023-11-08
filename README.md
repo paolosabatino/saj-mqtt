@@ -59,10 +59,26 @@ Example: writereg.py 192.168.1.30 H1S267K2429B029410 0x3635 0x1
 This script accepts on the stdin the binary registers read from the inverter at address 0x4000 and parse 
 the content according to the datasheet to provide realtime information about the inverter status.
 
-It can be used piped to `readregs.py` this way:
+It can be used to read from a file with the output from `readregs.py` this way:
+
+```commandline
+$ python3 parsedata.py
+Usage: parsedata.py -f <file>
+Example: parsedata.py -f data.bin
+```
+
+It can also be used piped to `readregs.py` this way:
+
+On Unix/Linux:
 
 ```commandline
 python3 readregs.py <mqtt_broker_ip> <inverter_serial> 0x4000 0x100 2> /dev/null | python3 parsedata.py -p
+```
+
+On Windows:
+
+```commandline
+python readregs.py <mqtt_broker_ip> <inverter_serial> 0x4000 0x100 | python parsedata.py -p
 ```
 
 ### fix-osc.py

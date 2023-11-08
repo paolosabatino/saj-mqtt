@@ -1,15 +1,25 @@
 from struct import unpack_from, pack
 from datetime import datetime
 from sys import argv
+import os
+import sys
 import time
 
-filein = open("/dev/stdin", "rb")
+if len(argv) > 1 and argv[1] == "-p":
+      if os.name == 'nt':
+            filein = open(sys.stdin.fileno(), "rb", closefd=False)
+      else:
+            filein = open("/dev/stdin", "rb")
+elif len(argv) > 2 and argv[1] == "-f" and argv[2] is not None:
+      filein = open(argv[2], "rb")
+else:
+      print("Either pipe the output with -p or provide an input file with -f")
+      sys.exit(-1)
 
 data = filein.read(1200)
 
-if len(argv) > 1 and argv[1] == "-p":
-      header = pack(">II", 0x0, int(time.time()))
-      data = header + b'\x00'*28 + data
+header = pack(">II", 0x0, int(time.time()))
+data = header + b'\x00'*28 + data
 
 sequence, timestamp = unpack_from(">II", data, 0x0)
 date = datetime.fromtimestamp(timestamp)
@@ -108,10 +118,12 @@ pv2_curr /= 100
 # 0152 2 byte - Grid Direction - direzione flusso di rete, 0 riceve corrente, 1 produce corrente)
 # 0154 2 byte - Output Direction - direzione flusso output (non è chiaro il senso, presumibilmente 0 riceve e 1 produce)
 dir_pv, dir_bat, dir_grid, dir_output = unpack_from(">HhhH", data, 0x14e)
-dir_pv = "ingoing" if dir_pv == 0 else "outgoing"
-dir_bat = "discharging" if dir_bat == 0 else "charging"
-dir_grid = "fetching" if dir_grid == 0 else "putting"
-dir_output = "ingoing" if dir_output == 0 else "outgoing"
+
+# possible values are -1, 0 or 1
+dir_pv = "N/A" if dir_pv == -1 else 'standby' if dir_pv == 0 else "producing"
+dir_bat = "charging" if dir_bat == -1 else 'standby' if dir_bat == 0 else "discharging"
+dir_grid = "importing" if dir_grid == -1 else 'standby' if dir_grid == 0 else "exporting"
+dir_output = "N/A" if dir_output == -1 else 'standby' if dir_output == 0 else "consuming"
 
 # 0164 2 byte - SysTotalLoadWatt - Totale della potenza attiva dell'inverter (valore da controllare, riporta 18 Watt, ma può ben essere la potenza del carico)
 # ... buco di 8 byte, riprende a 016e modbus 40a5h
@@ -146,8 +158,8 @@ ENERGY_MAP = (
       ("battery supplied", 0x1c2),
       ("load power" ,0x1e2),
       ("backup load", 0x1f2),
-      ("exported to grid", 0x202),
-      ("imported from grid", 0x212)
+      ("grid exported", 0x202),
+      ("grid imported", 0x212)
 )
 for item, offset in ENERGY_MAP:
       stat_data = unpack_from(">IIII", data, offset)
@@ -157,7 +169,7 @@ for item, offset in ENERGY_MAP:
 print("Sequence number: %08d, packet datetime: %s" % (sequence, date))
 print("Inverter type: %4x, working mode: %d" % (inverter_type, inverter_work_mode))
 print("Sample datetime: %4d-%02d-%02d %02d:%02d:%02d" % (year, month, day, hour, minute, second))
-print("Heatsink temp: %d, leakage current: %dma, iso4: %d, Reconnection time: %d" % (heatsink_temp, earth_leakage, iso4, conn_time))
+print("Heatsink temp: %d°C, leakage current: %dmA, iso4: %dkΩ, Reconnection time: %d" % (heatsink_temp, earth_leakage, iso4, conn_time))
 print()
 print("Grid data:")
 print("Voltage: %3.1fV\t\tCurrent: %1.3fA\t\tFrequency: %2.2fHz" % (rgrid_volt, rgrid_curr, rgrid_freq))
