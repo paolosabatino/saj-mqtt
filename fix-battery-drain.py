@@ -105,5 +105,9 @@ except TimeoutError as e:
     logging.error("Timeout error on initialization: %s" % (e,))
     exit_code = 1
 
-fixBatteryDrain.shutdown()
+try:
+    fixBatteryDrain.shutdown()
+except:
+    pass
+
 exit(exit_code)

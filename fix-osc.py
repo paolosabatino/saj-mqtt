@@ -203,7 +203,12 @@ try:
 except KeyboardInterrupt:
     pass
 except:
+    logging.exception("An unexpected exception occurred")
     exit_code = 1
 
-fixOsc.shutdown()
+try:
+    fixOsc.shutdown()
+except:
+    pass
+
 exit(exit_code)
