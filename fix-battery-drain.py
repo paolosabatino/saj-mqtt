@@ -28,7 +28,7 @@ class FixBatteryDrain(object):
     THRESHOLD = -5  # Watts
 
     NORMAL_CYCLE_DURATION = 120  # in seconds
-    FIX_CYCLE_DURATION = 21600  # in seconds
+    FIX_CYCLE_DURATION = 1800  # in seconds
 
     def __init__(self):
         self.run = False
