@@ -20,6 +20,8 @@ class FixBatteryDrain(object):
     REG_PHOTOVOLTAIC_TOTAL = 0x40a5
     REG_SMART_METER_LOAD = 0x40a1
     REG_REVERSE_FLOW = 0x3635
+    REG_APP_MODE = 0x3247
+    REG_BATTERY_CURRENT = 0x406a
 
     FLAG_REVERSE_FLOW_PREVENT = 0x1
     FLAG_REVERSE_FLOW_ALLOW = 0x0
@@ -30,28 +32,113 @@ class FixBatteryDrain(object):
     NORMAL_CYCLE_DURATION = 120  # in seconds
     FIX_CYCLE_DURATION = 1800  # in seconds
 
+    APP_MODE_SELF_USE = 0x0
+    APP_MODE_PASSIVE = 0x3
+
     def __init__(self):
         self.run = False
         self.sajmqtt = None
+
+        self.is_fix_applied = None
+        self.app_mode = None
+
+    def preventReverseFlow(self):
+        self.sajmqtt.write(FixBatteryDrain.REG_REVERSE_FLOW, FixBatteryDrain.FLAG_REVERSE_FLOW_PREVENT)
+        self.is_fix_applied = True
+
+    def allowReverseFlow(self):
+        self.sajmqtt.write(FixBatteryDrain.REG_REVERSE_FLOW, FixBatteryDrain.FLAG_REVERSE_FLOW_ALLOW)
+        self.is_fix_applied = False
+
+    def applySelfUse(self):
+        self.sajmqtt.write(FixBatteryDrain.REG_APP_MODE, FixBatteryDrain.APP_MODE_SELF_USE)
+        self.app_mode = FixBatteryDrain.APP_MODE_SELF_USE
+
+    def applyPassive(self):
+        self.sajmqtt.write(FixBatteryDrain.REG_APP_MODE, FixBatteryDrain.APP_MODE_PASSIVE)
+        self.app_mode = FixBatteryDrain.APP_MODE_PASSIVE
+
+    def doCycleSelfUse(self, battery_current, power_pv, power_meter):
+        """
+        Do the
+        :param is_fix_applied:
+        :param battery_current:
+        :param power_pv:
+        :param power_meter:
+        :return:
+        """
+
+        new_duration = None
+
+        # When battery is not charging nor depleting and there is no photovoltaic
+        # power, plus there is some load, then it means that the battery SOC has
+        # reached low watermark
+        if battery_current == 0 and power_pv == 0 and power_meter > 0:
+            # Turn off the flow prevention, we are moving into passive mode and
+            # don't need that
+            logging.info("Moving into passive mode, status: battery_current: %.2f, power_pv: %d, power_meter: %d" %
+                         (battery_current, power_pv, power_meter), )
+            self.allowReverseFlow()
+            self.applyPassive()
+
+            new_duration = FixBatteryDrain.FIX_CYCLE_DURATION
+
+        else:
+
+            if self.is_fix_applied is False:
+                if power_pv == 0 and power_meter < FixBatteryDrain.THRESHOLD:
+                    logging.info("Apply fix, status: battery_current: %.2f, power_pv: %d, power_meter: %d" %
+                                 (battery_current, power_pv, power_meter), )
+                    self.preventReverseFlow()
+                    new_duration = FixBatteryDrain.FIX_CYCLE_DURATION
+
+            elif self.is_fix_applied is True and power_meter >= 0:
+                logging.info("Restoring condition, status: battery_current: %.2f, power_pv: %d, power_meter: %d" %
+                             (battery_current, power_pv, power_meter), )
+                self.allowReverseFlow()
+                new_duration = FixBatteryDrain.NORMAL_CYCLE_DURATION
+
+        return new_duration
+
+    def doCyclePassiveMode(self, battery_current, power_pv, power_meter):
+        """
+            If in passive mode, as soon as we notice any kind of photovoltaic power
+            move out from passive mode and restore self use
+        :param battery_current:
+        :param power_pv:
+        :param power_meter:
+        :return:
+        """
+        new_duration = None
+
+        if power_pv > 0:
+            logging.info("Moving into self use mode, status: battery_current: %.2f, power_pv: %d, power_meter: %d" %
+                         (battery_current, power_pv, power_meter), )
+            self.allowReverseFlow()
+            self.applySelfUse()
+
+            new_duration = FixBatteryDrain.NORMAL_CYCLE_DURATION
+
+        return new_duration
 
     def start(self, broker, serial):
         self.sajmqtt = sajmqtt.SajMqtt(broker, "empty_user", "empty_pass", serial)
         self.sajmqtt.listen()
 
         self.run = True
-        is_fix_applied = None
 
         # Get the current state
-        while is_fix_applied is None:
+        while self.is_fix_applied is None or self.app_mode is None:
             try:
-                is_fix_applied, = unpack_from(">H", self.sajmqtt.query(FixBatteryDrain.REG_REVERSE_FLOW, 1))
-                is_fix_applied = is_fix_applied == 1
+                self.is_fix_applied, = unpack_from(">H", self.sajmqtt.query(FixBatteryDrain.REG_REVERSE_FLOW, 1))
+                self.is_fix_applied = self.is_fix_applied == 1
+                self.app_mode, = unpack_from(">H", self.sajmqtt.query(FixBatteryDrain.REG_APP_MODE, 1))
             except:
                 time.sleep(10)
 
         duration = FixBatteryDrain.NORMAL_CYCLE_DURATION
 
-        logging.info("fix-battery-drain set up, initial fix state is %s" % ("on" if is_fix_applied else "off",))
+        logging.info("fix-battery-drain set up, initial fix state is %s, app mode is %d" % ("on" if self.is_fix_applied else "off", self.app_mode))
 
         while self.run:
 
@@ -59,19 +146,18 @@ class FixBatteryDrain(object):
 
                 power_pv, = unpack_from(">h", self.sajmqtt.query(FixBatteryDrain.REG_PHOTOVOLTAIC_TOTAL, 1))
                 power_meter, = unpack_from(">h", self.sajmqtt.query(FixBatteryDrain.REG_SMART_METER_LOAD, 1))
+                battery_current, = unpack_from(">h", self.sajmqtt.query(FixBatteryDrain.REG_BATTERY_CURRENT, 1))
+                battery_current = battery_current * 0.01
 
-                if is_fix_applied is False:
-                    if power_pv == 0 and power_meter < FixBatteryDrain.THRESHOLD:
-                        logging.info("Apply fix, status: power_pv: %d, power_meter: %d" % (power_pv, power_meter),)
-                        self.sajmqtt.write(FixBatteryDrain.REG_REVERSE_FLOW, FixBatteryDrain.FLAG_REVERSE_FLOW_PREVENT)
-                        is_fix_applied = True
-                        duration = FixBatteryDrain.FIX_CYCLE_DURATION
+                new_duration = None
 
-                elif is_fix_applied is True and power_meter >= 0:
-                    logging.info("Restoring condition, status: power_pv: %d, power_meter: %d" % (power_pv, power_meter), )
-                    self.sajmqtt.write(FixBatteryDrain.REG_REVERSE_FLOW, FixBatteryDrain.FLAG_REVERSE_FLOW_ALLOW)
-                    is_fix_applied = False
-                    duration = FixBatteryDrain.NORMAL_CYCLE_DURATION
+                if self.app_mode == FixBatteryDrain.APP_MODE_SELF_USE:
+                    new_duration = self.doCycleSelfUse(battery_current, power_pv, power_meter)
+                elif self.app_mode == FixBatteryDrain.APP_MODE_PASSIVE:
+                    new_duration = self.doCyclePassiveMode(battery_current, power_pv, power_meter)
+
+                if new_duration is not None:
+                    duration = new_duration
 
             except TimeoutError as e:
                 logging.error(e,)
