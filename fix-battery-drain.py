@@ -70,16 +70,16 @@ class FixBatteryDrain(object):
 
         new_duration = None
 
-        # When battery is not charging nor depleting and there is no photovoltaic
+        # When battery has minimal charging and there is no photovoltaic
         # power, plus there is some load, then it means that the battery SOC has
         # reached low watermark
-        if battery_current == 0 and power_pv == 0 and power_meter > 0:
+        if -1.0 <= battery_current <= 0.0 and power_pv == 0 and power_meter > 0:
             # Turn off the flow prevention, we are moving into passive mode and
             # don't need that
             logging.info("Moving into passive mode, status: battery_current: %.2f, power_pv: %d, power_meter: %d" %
                          (battery_current, power_pv, power_meter), )
-            self.allowReverseFlow()
             self.applyPassive()
+            self.allowReverseFlow()
 
             new_duration = FixBatteryDrain.FIX_CYCLE_DURATION
 
@@ -114,8 +114,8 @@ class FixBatteryDrain(object):
         if power_pv > 0:
             logging.info("Moving into self use mode, status: battery_current: %.2f, power_pv: %d, power_meter: %d" %
                          (battery_current, power_pv, power_meter), )
-            self.allowReverseFlow()
             self.applySelfUse()
+            self.allowReverseFlow()
 
             new_duration = FixBatteryDrain.NORMAL_CYCLE_DURATION
 
