@@ -73,7 +73,7 @@ class FixBatteryDrain(object):
         # When battery has minimal charging and there is no photovoltaic
         # power, plus there is some load, then it means that the battery SOC has
         # reached low watermark
-        if -1.0 <= battery_current <= 0.0 and power_pv == 0 and power_meter > 0:
+        if -1.0 <= battery_current <= -0.01 and power_pv == 0 and power_meter > 0:
             # Turn off the flow prevention, we are moving into passive mode and
             # don't need that
             logging.info("Moving into passive mode, status: battery_current: %.2f, power_pv: %d, power_meter: %d" %
