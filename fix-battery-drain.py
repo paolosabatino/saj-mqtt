@@ -58,10 +58,10 @@ class FixBatteryDrain(object):
         self.sajmqtt.write(FixBatteryDrain.REG_APP_MODE, FixBatteryDrain.APP_MODE_PASSIVE)
         self.app_mode = FixBatteryDrain.APP_MODE_PASSIVE
 
-    def doCycleSelfUse(self, battery_current, power_pv, power_meter):
+    def doCycleSelfUse(self, battery_current, power_pv, power_meter, time_last_pv_power):
         """
-        Do the
-        :param is_fix_applied:
+        Do the self use cycle parameter evaluation
+        :param time_last_pv_power:
         :param battery_current:
         :param power_pv:
         :param power_meter:
@@ -69,11 +69,12 @@ class FixBatteryDrain(object):
         """
 
         new_duration = None
+        interval_no_pv_power = time.time() - time_last_pv_power
 
         # When battery has minimal charging and there is no photovoltaic
-        # power, plus there is some load, then it means that the battery SOC has
+        # power for at least 1800 seconds, plus there is some load, then it means that the battery SOC has
         # reached low watermark
-        if -1.0 <= battery_current <= -0.01 and power_pv == 0 and power_meter > 0:
+        if -1.0 <= battery_current <= -0.01 and power_pv == 0 and power_meter > 0 and interval_no_pv_power > 1800:
             # Turn off the flow prevention, we are moving into passive mode and
             # don't need that
             logging.info("Moving into passive mode, status: battery_current: %.2f, power_pv: %d, power_meter: %d" %
@@ -137,6 +138,7 @@ class FixBatteryDrain(object):
                 time.sleep(10)
 
         duration = FixBatteryDrain.NORMAL_CYCLE_DURATION
+        time_last_pv_power = 0
 
         logging.info("fix-battery-drain set up, initial fix state is %s, app mode is %d" % ("on" if self.is_fix_applied else "off", self.app_mode))
 
@@ -151,8 +153,11 @@ class FixBatteryDrain(object):
 
                 new_duration = None
 
+                if power_pv > 0:
+                    time_last_pv_power = time.time()
+
                 if self.app_mode == FixBatteryDrain.APP_MODE_SELF_USE:
-                    new_duration = self.doCycleSelfUse(battery_current, power_pv, power_meter)
+                    new_duration = self.doCycleSelfUse(battery_current, power_pv, power_meter, time_last_pv_power)
                 elif self.app_mode == FixBatteryDrain.APP_MODE_PASSIVE:
                     new_duration = self.doCyclePassiveMode(battery_current, power_pv, power_meter)
 
