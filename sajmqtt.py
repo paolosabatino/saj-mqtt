@@ -1,6 +1,5 @@
 from struct import pack, unpack_from
 import struct
-from pymodbus.utilities import computeCRC
 import threading
 import random
 import paho.mqtt.client as paho
@@ -41,6 +40,26 @@ class SajMqtt(object):
 
         self.pending = dict()
         self.condition = threading.Condition()
+
+    @staticmethod
+    def _computeCRC(msg: str) -> int:
+        """
+            CRC algorithm for modbus protocol, taken from:
+            https://stackoverflow.com/questions/69369408/calculating-crc16-in-python-for-modbus
+            and adapted to swap buffers
+        :param msg:
+        :return:
+        """
+        crc = 0xFFFF
+        for n in range(len(msg)):
+            crc ^= msg[n]
+            for i in range(8):
+                if crc & 1:
+                    crc >>= 1
+                    crc ^= 0xA001
+                else:
+                    crc >>= 1
+        return ((crc & 0xff) << 8) | (crc >> 8)
 
     def listen(self):
 
@@ -163,7 +182,7 @@ class SajMqtt(object):
         """
         # Build the modbus content part of the MQTT packet
         content = pack(">BBHH", address, SajMqtt.MODBUS_READ_REQUEST, register_start, register_count)
-        crc16 = computeCRC(content)
+        crc16 = SajMqtt._computeCRC(content)
 
         # Assemble the modbus content into the MQTT packet framework
         req_id = int(random.random() * 65536)
@@ -186,7 +205,7 @@ class SajMqtt(object):
         """
         # Build the modbus content part of the MQTT packet
         content = pack(">BBHH", address, SajMqtt.MODBUS_WRITE_REQUEST, register, value)
-        crc16 = computeCRC(content)
+        crc16 = SajMqtt._computeCRC(content)
 
         # Assemble the modbus content into the MQTT packet framework
         req_id = int(random.random() * 65536)
@@ -216,7 +235,7 @@ class SajMqtt(object):
         crc16, = unpack_from(">H", packet, 0xb + size)
 
         # CRC is calculated starting from "request" at offset 0x3a
-        calc_crc = computeCRC(packet[0x8:0xb + size])
+        calc_crc = SajMqtt._computeCRC(packet[0x8:0xb + size])
 
         logging.debug("Register size: %d" % (size,))
         logging.debug("Register content: %s" % (":".join("%02x" % (byte,) for byte in content),))
@@ -237,7 +256,7 @@ class SajMqtt(object):
         crc16, = unpack_from(">H", packet, 0xe)
 
         # CRC is calculated starting from "request" at offset 0x3a
-        calc_crc = computeCRC(packet[0x8:0xe])
+        calc_crc = SajMqtt._computeCRC(packet[0x8:0xe])
 
         logging.debug("CRC16: %x: %s" % (crc16, "ok" if crc16 == calc_crc else "bad"))
 
