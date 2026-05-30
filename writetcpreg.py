@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 # write single register via modbus tcp
-# usage example: ./writetcpreg.py 192.168.16.1 0x3635 0x1
+# usage example: ./writetcpreg.py 192.168.16.1:502 0x3635 0x1
 
 from sajmodbustcp import SajModbusTcp
 from sys import argv, stdout, stderr
