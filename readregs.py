@@ -2,7 +2,8 @@
 # information gathering for saj inverters through data_transmission mqtt topic
 # usage example: ./readregs.py 192.168.16.1 H1S2602J2119E01121 0x4000 0x100 2>/dev/null | python3 saj.py -p
 
-from sajmqtt import SajMqtt
+#from sajmqtt import SajMqtt
+from sajmodbustcp import SajModbusTcp
 from sys import argv, stdout, stderr
 import logging
 
@@ -33,14 +34,15 @@ serial = argv[2]
 register_start = normalize_hex(argv[3])
 register_count = normalize_hex(argv[4])
 
-mqtt = SajMqtt(broker_ip, "empty_user", "empty_pass", serial)
-mqtt.listen()
+#saj = SajMqtt(broker_ip, "empty_user", "empty_pass", serial)
+saj = SajModbusTcp("192.168.16.36", 502)
+saj.listen()
 
 try:
-    data = mqtt.query(register_start, register_count)
+    data = saj.query(register_start, register_count)
     stderr.write("registers size: %d\n" % len(data,), )
     stdout.buffer.write(data)
 except (Exception, KeyboardInterrupt) as e:
     logging.error("an exception occurred: %s" % (e,))
 
-mqtt.shutdown()
+saj.shutdown()
