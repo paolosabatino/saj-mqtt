@@ -4,7 +4,7 @@ Description=Monitoring process for trashy inverters
 [Service]
 WorkingDirectory=/usr/local/bin/sajmqtt
 Type=simple
-ExecStart=/usr/local/bin/sajmqtt/fix-osc.py 192.168.16.1 H1S267K2429B029410
+ExecStart=/usr/local/bin/sajmqtt/fix-osc.py mqtt 192.168.16.1 H1S267K2429B029410
 KillMode=process
 Restart=on-failure
 RestartSec=60s
