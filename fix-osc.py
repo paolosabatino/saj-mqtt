@@ -7,7 +7,6 @@ from time import time
 from sys import argv
 import threading
 import logging
-from sajmqtt import SajMqtt
 
 FORMAT = '%(asctime)s %(message)s'
 logging.basicConfig(format=FORMAT)
@@ -27,14 +26,13 @@ class FixOsc(object):
     POWER_LIMITED = 100
     POWER_NOMINAL = 6000
 
-    def __init__(self, broker_ip: str, serial: str):
+    def __init__(self, inverter: object):
 
         self.thread = None
         self.run = False
         self.event = threading.Event()
 
-        self.serial = serial
-        self.broker_ip = broker_ip
+        self.inverter = inverter
 
         self.state = (FixOsc.STATE_NORMAL, None)
         self.lastfixtime = 0
@@ -47,7 +45,7 @@ class FixOsc(object):
         self.thread.start()
         self.thread.join()
 
-    def doAction(self, current_state: str, data: bytes, mqtt: SajMqtt):
+    def do_action(self, current_state: str, data: bytes, inverter: object):
 
         delay = FixOsc.DELAY_DEFAULT
 
@@ -64,13 +62,13 @@ class FixOsc(object):
                 if is_fix_required is True:
                     logging.info(
                         f"fix required, state -> photovoltaic: {power_pv}, battery: {power_battery}, grid: {power_grid}, backup: {power_backup}")
-                    self.do_transition_to_fix_osc(mqtt)
+                    self.do_transition_to_fix_osc(inverter)
 
             if current_state is FixOsc.STATE_FIX_OSC:
                 if self.can_exit_fix(power_pv, power_battery, power_grid, power_backup):
                     logging.info(
                         f"exit from osc mode, state -> photovoltaic: {power_pv}, battery: {power_battery}, grid: {power_grid}, backup: {power_backup}")
-                    self.do_transition_out_fix_osc(mqtt)
+                    self.do_transition_out_fix_osc(inverter)
 
             if 10 < power_pv < 150:
                 delay = FixOsc.DELAY_SHORT
@@ -84,8 +82,11 @@ class FixOsc(object):
 
         logging.info("fixosc thread started")
 
-        mqtt = SajMqtt(self.broker_ip, "empty_user", "empty_pass", self.serial)
-        mqtt.listen()
+        inverter = self.inverter
+        if hasattr(inverter, "listen"):
+            inverter.listen()
+        elif hasattr(inverter, "connect"):
+            inverter.connect()
 
         event = self.event
         lastquery = 0
@@ -103,18 +104,18 @@ class FixOsc(object):
                 logging.debug(f"current state {current_state}, arg: {argument}")
 
                 try:
-                    data = mqtt.query(0x40a5, 8)
+                    data = inverter.query(0x40a5, 8)
                     lastquery = time()
-                    delay = self.doAction(current_state, data, mqtt)
+                    delay = self.do_action(current_state, data, inverter)
                 except Exception as e:
                     logging.error("an exception occurred: %s" % (e,))
 
             if current_state is FixOsc.STATE_FIX_OSC:
                 if time() - argument > self.timeout:
                     logging.info("exit from oscillation fix mode due to timeout")
-                    self.do_transition_out_fix_osc(mqtt)
+                    self.do_transition_out_fix_osc(inverter)
 
-        mqtt.shutdown()
+        inverter.shutdown()
 
         logging.info("thread terminated")
 
@@ -162,7 +163,7 @@ class FixOsc(object):
 
         return False
 
-    def do_transition_to_fix_osc(self, mqtt: SajMqtt):
+    def do_transition_to_fix_osc(self, inverter: object):
 
         # doubles the fix timeout if a fix happened in the last 5 minutes
         if time() - self.lastfixtime < FixOsc.FIX_RELAX_MILD:
@@ -173,30 +174,64 @@ class FixOsc(object):
         logging.info("transition to fix osc, timeout for restoring condition: %d seconds" % (self.timeout,))
 
         try:
-            mqtt.write(0x3249, FixOsc.POWER_LIMITED)
+            inverter.write(0x3249, FixOsc.POWER_LIMITED)
             self.state = (FixOsc.STATE_FIX_OSC, time())
         except Exception as e:
             logging.error("could not write register to fix osc. Reason: %s" % (e,))
 
-    def do_transition_out_fix_osc(self, mqtt):
+    def do_transition_out_fix_osc(self, inverter: object):
 
         try:
-            mqtt.write(0x3249, FixOsc.POWER_NOMINAL)
+            inverter.write(0x3249, FixOsc.POWER_NOMINAL)
             self.state = (FixOsc.STATE_NORMAL, None)
             self.lastfixtime = time()
         except Exception as e:
             logging.error("could not write register to restore condition. Reason: %s" % (e,))
 
+def print_usage():
+    print("Usage:")
+    print("\t%s mqtt <broker_ip> <serial>" % (argv[0],))
+    print("\t%s tcpmodbus <server_ip>:<server_port>" % (argv[0],))
 
-if len(argv) < 3:
-    print("Usage: %s <broker_ip> <serial>" % (argv[0],))
-    exit()
 
-broker_ip = argv[1]
-serial = argv[2]
+try:
+
+    if len(argv) < 3:
+        raise ValueError()
+
+    protocol = argv[1]
+
+    if protocol not in ("mqtt", "tcpmodbus"):
+        raise ValueError()
+
+    if protocol == "mqtt":
+
+        if len(argv) < 4:
+            raise ValueError()
+
+        broker_ip = argv[2]
+        serial = argv[3]
+
+        from sajmqtt import SajMqtt
+        inverter = SajMqtt(broker_ip, "empty_user", "empty_pass", serial)
+
+    elif protocol == "tcpmodbus":
+
+        if len(argv) < 3:
+            raise ValueError()
+
+        server_ip, server_port = argv[2].split(":")
+
+        from sajmodbustcp import SajModbusTcp
+        inverter = SajModbusTcp(server_ip, server_port)
+
+except ValueError:
+    print_usage()
+    exit(1)
+
 exit_code = 0
 
-fixOsc = FixOsc(broker_ip, serial)
+fixOsc = FixOsc(inverter)
 
 try:
     fixOsc.start()
