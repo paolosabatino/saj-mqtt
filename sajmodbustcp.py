@@ -26,39 +26,32 @@ class SajModbusTcp(object):
     def __init__(self, ip_address: str, port: int, timeout:float = 3, retries: int = 3, retries_delay: float = 1):
 
         self.ip_address = ip_address
-        self.port = port
+        self.port = int(port)
         self.timeout = timeout
         self.retries = retries
         self.retries_delay = retries_delay
 
-        self.client = None
+        self.client = ModbusTcpClient(host=self.ip_address, port=self.port, timeout=self.timeout, retries=1)
 
     def connect(self):
 
-        if self.client:
-            return
+        logging.debug("connecting to %s:%d" % (self.ip_address, self.port))
 
-        logging.debug("starting saj modbus tcp library")
-
-        client = ModbusTcpClient(host=self.ip_address, port=self.port, timeout=self.timeout, retries=1)
-        ret = client.connect()
+        ret = self.client.connect()
 
         if not ret:
             raise Exception("could not connect")
 
-        self.client = client
-
-        logging.debug("started saj modbus tcp library")
+        logging.debug("connected to %s:%d" % (self.ip_address, self.port))
 
     def shutdown(self):
 
-        logging.debug("shutting down saj modbus tcp library")
+        logging.debug("disconnecting from %s:%d" % (self.ip_address, self.port))
 
         if self.client:
             self.client.close()
-            self.client = None
 
-        logging.info("shat down saj modbus tcp library")
+        logging.debug("disconnected from %s:%d" % (self.ip_address, self.port))
 
     def query(self, start: int, count: int) -> bytes:
         """
@@ -74,25 +67,47 @@ class SajModbusTcp(object):
             amount = min(count, SajModbusTcp.MAX_REGISTERS_PER_REQUEST)
 
             retries = self.retries
+            response = None
 
             while True:
 
-                response = self.client.read_holding_registers(address=start, count=amount)
+                try:
 
-                if response.isError() is False:
-                    break
+                    response = self.client.read_holding_registers(address=start, count=amount)
 
-                retries-=1
+                    if response.isError() is False:
+                        break
 
-                exception_code = response.exception_code
-                reason = SajModbusTcp.EXCEPTION_CODES.get(exception_code, "Unknown")
-                logging.debug("request failed, exception code: %d, reason: %s, remaining attempts: %d" % (
-                    exception_code, reason, retries,))
+                    retries -= 1
+
+                    exception_code = response.exception_code
+                    reason = SajModbusTcp.EXCEPTION_CODES.get(exception_code, "Unknown")
+                    logging.debug("request failed, exception code: %d, reason: %s, remaining attempts: %d" % (
+                        exception_code, reason, retries,))
+
+                except BrokenPipeError as bp:
+                    logging.debug("request failed, exception: %s (%s), trying to reconnect, remaining attempts: %d" % (
+                        bp, type(bp).__name__, retries,))
+
+                    retries -= 1
+
+                    self.shutdown()
+                    self.connect()
+
+                except Exception as e:
+
+                    retries -= 1
+
+                    logging.debug("request failed, exception: %s (%s), remaining attempts: %d" % (
+                        e, type(e).__name__, retries,))
 
                 if retries <= 0:
                     break
 
                 time.sleep(self.retries_delay)
+
+            if not response:
+                raise Exception("no response")
 
             if response.isError():
                 exception_code = response.exception_code
@@ -118,24 +133,48 @@ class SajModbusTcp(object):
 
         retries = self.retries
 
+        response = None
+
         while True:
 
-            response = self.client.write_register(register, value)
+            try:
 
-            if response.isError() is False:
-                break
+                response = self.client.write_register(register, value)
 
-            retries-=1
+                if response.isError() is False:
+                    break
 
-            exception_code = response.exception_code
-            reason = SajModbusTcp.EXCEPTION_CODES.get(exception_code, "Unknown")
-            logging.debug("request failed, exception code: %d, reason: %s, remaining attempts: %d" % (
-                exception_code, reason, retries))
+                retries-=1
+
+                exception_code = response.exception_code
+                reason = SajModbusTcp.EXCEPTION_CODES.get(exception_code, "Unknown")
+                logging.debug("request failed, exception code: %d, reason: %s, remaining attempts: %d" % (
+                    exception_code, reason, retries))
+
+
+            except BrokenPipeError as bp:
+                logging.debug("request failed, exception: %s (%s), trying to reconnect, remaining attempts: %d" % (
+                    bp, type(bp).__name__, retries,))
+
+                retries -= 1
+
+                self.shutdown()
+                self.connect()
+
+            except Exception as e:
+
+                retries -= 1
+
+                logging.debug("request failed, exception: %s (%s), remaining attempts: %d" % (
+                    e, type(e).__name__, retries,))
 
             if retries <= 0:
                 break
 
             time.sleep(self.retries_delay)
+
+        if not response:
+            raise Exception("no response")
 
         if response.isError():
             exception_code = response.exception_code
