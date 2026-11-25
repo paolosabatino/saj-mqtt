@@ -7,9 +7,6 @@ import time
 from sys import argv
 import logging
 
-import sajmqtt
-from sajmqtt import SajMqtt
-
 FORMAT = '%(asctime)s %(message)s'
 logging.basicConfig(format=FORMAT)
 logging.getLogger().setLevel(logging.INFO)
@@ -35,27 +32,27 @@ class FixBatteryDrain(object):
     APP_MODE_SELF_USE = 0x0
     APP_MODE_PASSIVE = 0x3
 
-    def __init__(self):
+    def __init__(self, inverter):
         self.run = False
-        self.sajmqtt = None
+        self.inverter = inverter
 
         self.is_fix_applied = None
         self.app_mode = None
 
     def preventReverseFlow(self):
-        self.sajmqtt.write(FixBatteryDrain.REG_REVERSE_FLOW, FixBatteryDrain.FLAG_REVERSE_FLOW_PREVENT)
+        self.inverter.write(FixBatteryDrain.REG_REVERSE_FLOW, FixBatteryDrain.FLAG_REVERSE_FLOW_PREVENT)
         self.is_fix_applied = True
 
     def allowReverseFlow(self):
-        self.sajmqtt.write(FixBatteryDrain.REG_REVERSE_FLOW, FixBatteryDrain.FLAG_REVERSE_FLOW_ALLOW)
+        self.inverter.write(FixBatteryDrain.REG_REVERSE_FLOW, FixBatteryDrain.FLAG_REVERSE_FLOW_ALLOW)
         self.is_fix_applied = False
 
     def applySelfUse(self):
-        self.sajmqtt.write(FixBatteryDrain.REG_APP_MODE, FixBatteryDrain.APP_MODE_SELF_USE)
+        self.inverter.write(FixBatteryDrain.REG_APP_MODE, FixBatteryDrain.APP_MODE_SELF_USE)
         self.app_mode = FixBatteryDrain.APP_MODE_SELF_USE
 
     def applyPassive(self):
-        self.sajmqtt.write(FixBatteryDrain.REG_APP_MODE, FixBatteryDrain.APP_MODE_PASSIVE)
+        self.inverter.write(FixBatteryDrain.REG_APP_MODE, FixBatteryDrain.APP_MODE_PASSIVE)
         self.app_mode = FixBatteryDrain.APP_MODE_PASSIVE
 
     def doCycleSelfUse(self, battery_current, power_pv, power_meter, time_last_pv_power):
@@ -122,18 +119,23 @@ class FixBatteryDrain(object):
 
         return new_duration
 
-    def start(self, broker, serial):
-        self.sajmqtt = sajmqtt.SajMqtt(broker, "empty_user", "empty_pass", serial)
-        self.sajmqtt.listen()
+    def start(self):
+
+        inverter = self.inverter
+
+        if hasattr(inverter, "listen"):
+            inverter.listen()
+        elif hasattr(inverter, "connect"):
+            inverter.connect()
 
         self.run = True
 
         # Get the current state
         while self.is_fix_applied is None or self.app_mode is None:
             try:
-                self.is_fix_applied, = unpack_from(">H", self.sajmqtt.query(FixBatteryDrain.REG_REVERSE_FLOW, 1))
+                self.is_fix_applied, = unpack_from(">H", inverter.query(FixBatteryDrain.REG_REVERSE_FLOW, 1))
                 self.is_fix_applied = self.is_fix_applied == 1
-                self.app_mode, = unpack_from(">H", self.sajmqtt.query(FixBatteryDrain.REG_APP_MODE, 1))
+                self.app_mode, = unpack_from(">H", inverter.query(FixBatteryDrain.REG_APP_MODE, 1))
             except:
                 time.sleep(10)
 
@@ -146,9 +148,9 @@ class FixBatteryDrain(object):
 
             try:
 
-                power_pv, = unpack_from(">h", self.sajmqtt.query(FixBatteryDrain.REG_PHOTOVOLTAIC_TOTAL, 1))
-                power_meter, = unpack_from(">h", self.sajmqtt.query(FixBatteryDrain.REG_SMART_METER_LOAD, 1))
-                battery_current, = unpack_from(">h", self.sajmqtt.query(FixBatteryDrain.REG_BATTERY_CURRENT, 1))
+                power_pv, = unpack_from(">h", inverter.query(FixBatteryDrain.REG_PHOTOVOLTAIC_TOTAL, 1))
+                power_meter, = unpack_from(">h", inverter.query(FixBatteryDrain.REG_SMART_METER_LOAD, 1))
+                battery_current, = unpack_from(">h", inverter.query(FixBatteryDrain.REG_BATTERY_CURRENT, 1))
                 battery_current = battery_current * 0.01
 
                 new_duration = None
@@ -173,23 +175,56 @@ class FixBatteryDrain(object):
     def shutdown(self):
         self.run = False
 
-        if self.sajmqtt:
-            self.sajmqtt.shutdown()
+        if hasattr(self.inverter, "shutdown"):
+            self.inverter.shutdown()
 
+def print_usage():
+    print("Usage:")
+    print("\t%s mqtt <broker_ip> <serial>" % (argv[0],))
+    print("\t%s tcpmodbus <server_ip>:<server_port>" % (argv[0],))
 
 # entry point
 
-if len(argv) < 3:
-    print("Usage: %s <broker_ip> <serial>" % (argv[0],))
-    exit()
+try:
 
-broker_ip = argv[1]
-serial = argv[2]
+    if len(argv) < 3:
+        raise ValueError()
+
+    protocol = argv[1]
+
+    if protocol not in ("mqtt", "tcpmodbus"):
+        raise ValueError()
+
+    if protocol == "mqtt":
+
+        if len(argv) < 4:
+            raise ValueError()
+
+        broker_ip = argv[2]
+        serial = argv[3]
+
+        from sajmqtt import SajMqtt
+        inverter = SajMqtt(broker_ip, "empty_user", "empty_pass", serial)
+
+    elif protocol == "tcpmodbus":
+
+        if len(argv) < 3:
+            raise ValueError()
+
+        server_ip, server_port = argv[2].split(":")
+
+        from sajmodbustcp import SajModbusTcp
+        inverter = SajModbusTcp(server_ip, server_port)
+
+except ValueError:
+    print_usage()
+    exit(1)
+
 exit_code = 0
 
-fixBatteryDrain = FixBatteryDrain()
+fixBatteryDrain = FixBatteryDrain(inverter)
 try:
-    fixBatteryDrain.start(broker_ip, serial)
+    fixBatteryDrain.start()
 except KeyboardInterrupt:
     pass
 except TimeoutError as e:
